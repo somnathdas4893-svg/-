@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Car Racing Game</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+            background-color: #111;
+            user-select: none;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+        }
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #fff;
+            font-size: 24px;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+            pointer-events: none;
+        }
+        #game-over {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #fff;
+            text-align: center;
+            background: rgba(0, 0, 0, 0.85);
+            padding: 30px 50px;
+            border-radius: 15px;
+            box-shadow: 0 0 20px rgba(255, 0, 0, 0.5);
+            display: none;
+        }
+        #game-over h1 {
+            color: #ff3333;
+            margin-bottom: 10px;
+            font-size: 36px;
+        }
+        #restart-btn {
+            margin-top: 15px;
+            padding: 12px 25px;
+            font-size: 18px;
+            background: #28a745;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        #restart-btn:hover {
+            background: #218838;
+        }
+    </style>
+    <!-- Three.js Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+    <div id="canvas-container"></div>
+    
+    <div id="ui">
+        স্কোর: <span id="score">0</span>
+    </div>
+
+    <div id="game-over">
+        <h1>গেম ওভার!</h1>
+        <p>আপনার স্কোর: <span id="final-score">0</span></p>
+        <button id="restart-btn" onclick="restartGame()">আবার খেলুন</button>
+    </div>
+
+    <script>
+        let scene, camera, renderer;
+        let playerCar, road;
+        let obstacles = [];
+        let score = 0;
+        let speed = 0.8;
+        let isGameOver = false;
+
+        // কি-বোর্ড কন্ট্রোল
+        const keys = { Left: false, Right: false };
+
+        function init() {
+            // ১. সিন তৈরি
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1a1a2e);
+            scene.fog = new THREE.FogExp2(0x1a1a2e, 0.015);
+
+            // ২. ক্যামেরা সেটআপ
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 4, 10);
+            camera.lookAt(0, 1, 0);
+
+            // ৩. রেন্ডারার
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+            // ৪. লাইটিং (আলো)
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(10, 20, 10);
+            dirLight.castShadow = true;
+            scene.add(dirLight);
+
+            // ৫. রাস্তা তৈরি
+            const roadGeometry = new THREE.PlaneGeometry(12, 1000);
+            const roadMaterial = new THREE.MeshStandardMaterial({ color: 0x333333 });
+            road = new THREE.Mesh(roadGeometry, roadMaterial);
+            road.rotation.x = -Math.PI / 2;
+            road.position.z = -450;
+            road.receiveShadow = true;
+            scene.add(road);
+
+            // রাস্তার সাইড লাইন
+            const lineGeometry = new THREE.PlaneGeometry(0.3, 1000);
+            const lineMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+            const leftLine = new THREE.Mesh(lineGeometry, lineMaterial);
+            leftLine.rotation.x = -Math.PI / 2;
+            leftLine.position.set(-5.8, 0.01, -450);
+            scene.add(leftLine);
+
+            const rightLine = leftLine.clone();
+            rightLine.position.x = 5.8;
+            scene.add(rightLine);
+
+            // ৬. প্লেয়ারের গাড়ি তৈরি
+            playerCar = createCar(0x00d2d3);
+            playerCar.position.set(0, 0, 0);
+            scene.add(playerCar);
+
+            // ইভেন্ট লিসেনার যুক্ত করা
+            window.addEventListener('keydown', onKeyDown);
+            window.addEventListener('keyup', onKeyUp);
+            window.addEventListener('resize', onWindowResize);
+
+            // গেম লুপ শুরু
+            animate();
+        }
+
+        // গাড়ি বানানোর ফাংশন (3D Shapes দিয়ে)
+        function createCar(colorHex) {
+            const carGroup = new THREE.Group();
+
+            // গাড়ির বডি
+            const bodyGeo = new THREE.BoxGeometry(1.6, 0.6, 3);
+            const bodyMat = new THREE.MeshStandardMaterial({ color: colorHex, roughness: 0.3 });
+            const body = new THREE.Mesh(bodyGeo, bodyMat);
+            body.position.y = 0.5;
+            body.castShadow = true;
+            carGroup.add(body);
+
+            // গাড়ির ছাদ
+            const cabinGeo = new THREE.BoxGeometry(1.2, 0.5, 1.5);
+            const cabinMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+            const cabin = new THREE.Mesh(cabinGeo, cabinMat);
+            cabin.position.set(0, 0.95, -0.2);
+            cabin.castShadow = true;
+            carGroup.add(cabin);
+
+            // চাকা (৪ টি)
+            const wheelGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.3, 16);
+            const wheelMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+
+            const positions = [
+                [-0.85, 0.3, 0.9],
+                [0.85, 0.3, 0.9],
+                [-0.85, 0.3, -0.9],
+                [0.85, 0.3, -0.9]
+            ];
+
+            positions.forEach(pos => {
+                const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+                wheel.rotation.z = Math.PI / 2;
+                wheel.position.set(...pos);
+                carGroup.add(wheel);
+            });
+
+            return carGroup;
+        }
+
+        // বাধা (Enemy Cars) স্পন করা
+        function spawnObstacle() {
+            if (isGameOver) return;
+
+            const colors = [0xff6b6b, 0xffbe0b, 0xff007f, 0x06d6a0];
+            const randomColor = colors[Math.floor(Math.random() * colors.length)];
+            const obstacle = createCar(randomColor);
+
+            // ৩টি লেনের যেকোনো একটিতে স্পন হবে
+            const lanes = [-3.5, 0, 3.5];
+            const randomLane = lanes[Math.floor(Math.random() * lanes.length)];
+
+            obstacle.position.set(randomLane, 0, -100);
+            scene.add(obstacle);
+            obstacles.push(obstacle);
+
+            // পরবর্তী বাধা আসার সময়
+            setTimeout(spawnObstacle, Math.max(600, 1500 - score * 10));
+        }
+
+        // কন্ট্রোল
+        function onKeyDown(e) {
+            if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') keys.Left = true;
+            if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') keys.Right = true;
+        }
+
+        function onKeyUp(e) {
+            if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') keys.Left = false;
+            if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') keys.Right = false;
+        }
+
+        // রেসপনসিভ স্ক্রিন
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // সংঘর্ষ (Collision) চেক
+        function checkCollision(car1, car2) {
+            const p1 = car1.position;
+            const p2 = car2.position;
+
+            return Math.abs(p1.x - p2.x) < 1.4 && Math.abs(p1.z - p2.z) < 2.5;
+        }
+
+        // গেম ওভার
+        function triggerGameOver() {
+            isGameOver = true;
+            document.getElementById('final-score').innerText = Math.floor(score);
+            document.getElementById('game-over').style.display = 'block';
+        }
+
+        // রিস্টার্ট গেম
+        function restartGame() {
+            isGameOver = false;
+            score = 0;
+            speed = 0.8;
+            document.getElementById('score').innerText = '0';
+            document.getElementById('game-over').style.display = 'none';
+
+            // পুরনো বাধাগুলো সরানো
+            obstacles.forEach(obj => scene.remove(obj));
+            obstacles = [];
+
+            playerCar.position.set(0, 0, 0);
+            spawnObstacle();
+        }
+
+        // অ্যানিমেশন লুপ
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (!isGameOver) {
+                // পজিশন মুভমেন্ট
+                if (keys.Left && playerCar.position.x > -4.5) {
+                    playerCar.position.x -= 0.15;
+                    playerCar.rotation.y = 0.1;
+                } else if (keys.Right && playerCar.position.x < 4.5) {
+                    playerCar.position.x += 0.15;
+                    playerCar.rotation.y = -0.1;
+                } else {
+                    playerCar.rotation.y = 0;
+                }
+
+                // বাধা আপডেট করা
+                for (let i = obstacles.length - 1; i >= 0; i--) {
+                    let obs = obstacles[i];
+                    obs.position.z += speed;
+
+                    // সংঘর্ষ চেক
+                    if (checkCollision(playerCar, obs)) {
+                        triggerGameOver();
+                    }
+
+                    // স্ক্রিন পার হলে সরিয়ে ফেলা
+                    if (obs.position.z > 10) {
+                        scene.remove(obs);
+                        obstacles.splice(i, 1);
+                        score += 10;
+                        document.getElementById('score').innerText = score;
+                        speed += 0.01; // স্পিড বাড়ানো
+                    }
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // গেম চালু করা
+        init();
+        spawnObstacle();
+    </script>
+</body>
+</html>
